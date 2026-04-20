@@ -514,6 +514,11 @@ void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t 
                            const char *text) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
   queueMessage(from, TXT_TYPE_PLAIN, pkt, sender_timestamp, NULL, 0, text);
+
+  if (text && strcmp(text, "x12") == 0) {
+    uint32_t expected_ack, est_timeout;
+    sendMessage(from, getRTCClock()->getCurrentTimeUnique(), 0, "42", expected_ack, est_timeout);
+  }
 }
 
 void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
@@ -575,6 +580,61 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
   }
   if (_ui) _ui->newMsg(path_len, channel_name, text, offline_queue_len);
 #endif
+
+  const char *sep = strstr(text, ": ");
+  int sender_len = sep ? (int)(sep - text) : 0;
+  const char *body = sep ? sep + 2 : text;
+
+  ChannelDetails reply_chan;
+  bool have_chan = getChannel(channel_idx, reply_chan);
+
+  Serial.printf("[BOT] ch_idx=%u have_chan=%d text='%s'\n", channel_idx, have_chan, text);
+  if (have_chan) {
+    Serial.printf("[BOT] chan_name='%s' len=%u hex=", reply_chan.name, (unsigned)strlen(reply_chan.name));
+    for (size_t k = 0; k < strlen(reply_chan.name); k++) Serial.printf("%02X ", (uint8_t)reply_chan.name[k]);
+    Serial.println();
+  }
+  Serial.printf("[BOT] sender_len=%d body='%s'\n", sender_len, body);
+
+  if (have_chan && strcmp(body, "x12") == 0) {
+    Serial.println("[BOT] -> x12 match, sending '42'");
+    sendGroupMessage(getRTCClock()->getCurrentTimeUnique(), reply_chan.channel,
+                     _prefs.node_name, "42", 2);
+  }
+
+  bool chan_is_test = have_chan && strcasecmp(reply_chan.name, "#test") == 0;
+  bool body_is_ping = strcasecmp(body, "ping") == 0 || strcasecmp(body, "test") == 0;
+  Serial.printf("[BOT] chan_is_test=%d body_is_ping=%d\n", chan_is_test, body_is_ping);
+  if (chan_is_test && body_is_ping) {
+    char hops[96];
+    int hop_count = pkt->isRouteFlood() ? (int)pkt->getPathHashCount() : 0;
+    int hash_size = (int)pkt->getPathHashSize();
+    Serial.printf("[BOT] route=%u raw_path_len=%u count=%d size=%d\n",
+                  pkt->getRouteType(), pkt->path_len, hop_count, hash_size);
+    int p = snprintf(hops, sizeof(hops), "%d hops %.1fdB", hop_count, pkt->getSNR());
+    if (hop_count > 0 && p > 0 && p < (int)sizeof(hops) - 1) {
+      p += snprintf(hops + p, sizeof(hops) - p, " via ");
+      for (int k = 0; k < hop_count && p < (int)sizeof(hops) - 4; k++) {
+        if (k > 0 && p < (int)sizeof(hops) - 2) {
+          p += snprintf(hops + p, sizeof(hops) - p, ",");
+        }
+        for (int b = 0; b < hash_size && p < (int)sizeof(hops) - 3; b++) {
+          p += snprintf(hops + p, sizeof(hops) - p, "%02X",
+                        pkt->path[k * hash_size + b]);
+        }
+      }
+    }
+
+    char reply[MAX_TEXT_LEN];
+    int n = snprintf(reply, sizeof(reply), "@[%.*s] pong (Ricany slysi) [%s]",
+                     sender_len, text, hops);
+    if (n < 0) n = 0;
+    if (n > (int)sizeof(reply) - 1) n = sizeof(reply) - 1;
+    Serial.printf("[BOT] -> sending pong: '%s' (len=%d)\n", reply, n);
+    bool ok = sendGroupMessage(getRTCClock()->getCurrentTimeUnique(), reply_chan.channel,
+                               _prefs.node_name, reply, n);
+    Serial.printf("[BOT] sendGroupMessage returned %d\n", ok);
+  }
 }
 
 void MyMesh::onChannelDataRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint16_t data_type,

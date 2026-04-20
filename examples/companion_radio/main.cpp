@@ -107,6 +107,10 @@ void halt() {
 
 void setup() {
   Serial.begin(115200);
+  delay(200);
+  Serial.println();
+  Serial.println("==== MeshCore companion_radio_ble BOOT ====");
+  Serial.flush();
 
   board.begin();
 
@@ -223,6 +227,13 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t last_hb = 0;
+  uint32_t now = millis();
+  if (now - last_hb >= 5000) {
+    last_hb = now;
+    Serial.printf("[HB] %lu ms\n", (unsigned long)now);
+  }
+
   the_mesh.loop();
   sensors.loop();
 #ifdef DISPLAY_CLASS
