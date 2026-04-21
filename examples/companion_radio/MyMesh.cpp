@@ -514,11 +514,6 @@ void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t 
                            const char *text) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
   queueMessage(from, TXT_TYPE_PLAIN, pkt, sender_timestamp, NULL, 0, text);
-
-  if (text && strcmp(text, "x12") == 0) {
-    uint32_t expected_ack, est_timeout;
-    sendMessage(from, getRTCClock()->getCurrentTimeUnique(), 0, "42", expected_ack, est_timeout);
-  }
 }
 
 void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
@@ -596,14 +591,9 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
   }
   Serial.printf("[BOT] sender_len=%d body='%s'\n", sender_len, body);
 
-  if (have_chan && strcmp(body, "x12") == 0) {
-    Serial.println("[BOT] -> x12 match, sending '42'");
-    sendGroupMessage(getRTCClock()->getCurrentTimeUnique(), reply_chan.channel,
-                     _prefs.node_name, "42", 2);
-  }
-
   bool chan_is_test = have_chan && strcasecmp(reply_chan.name, "#test") == 0;
-  bool body_is_ping = strcasecmp(body, "ping") == 0 || strcasecmp(body, "test") == 0;
+  bool body_is_ping = strcasecmp(body, "ping") == 0 || strcasecmp(body, "test") == 0
+                      || strcasecmp(body, "trace") == 0 || strcasecmp(body, "path") == 0;
   Serial.printf("[BOT] chan_is_test=%d body_is_ping=%d\n", chan_is_test, body_is_ping);
   if (chan_is_test && body_is_ping) {
     char hops[96];
@@ -611,7 +601,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
     int hash_size = (int)pkt->getPathHashSize();
     Serial.printf("[BOT] route=%u raw_path_len=%u count=%d size=%d\n",
                   pkt->getRouteType(), pkt->path_len, hop_count, hash_size);
-    int p = snprintf(hops, sizeof(hops), "%d hops %.1fdB", hop_count, pkt->getSNR());
+    int p = snprintf(hops, sizeof(hops), "%d hops", hop_count);
     if (hop_count > 0 && p > 0 && p < (int)sizeof(hops) - 1) {
       p += snprintf(hops + p, sizeof(hops) - p, " via ");
       for (int k = 0; k < hop_count && p < (int)sizeof(hops) - 4; k++) {
@@ -626,7 +616,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
     }
 
     char reply[MAX_TEXT_LEN];
-    int n = snprintf(reply, sizeof(reply), "@[%.*s] pong (Ricany slysi) [%s]",
+    int n = snprintf(reply, sizeof(reply), "@[%.*s] Ricany slysi [%s]",
                      sender_len, text, hops);
     if (n < 0) n = 0;
     if (n > (int)sizeof(reply) - 1) n = sizeof(reply) - 1;
