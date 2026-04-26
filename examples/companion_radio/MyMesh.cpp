@@ -530,6 +530,26 @@ void MyMesh::onSignedMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uin
   queueMessage(from, TXT_TYPE_SIGNED_PLAIN, pkt, sender_timestamp, sender_prefix, 4, text);
 }
 
+static void composeHopsString(mesh::Packet *pkt, char *out, size_t out_len) {
+  int hop_count = pkt->isRouteFlood() ? (int)pkt->getPathHashCount() : 0;
+  int hash_size = (int)pkt->getPathHashSize();
+  Serial.printf("[BOT] route=%u raw_path_len=%u count=%d size=%d\n",
+                pkt->getRouteType(), pkt->path_len, hop_count, hash_size);
+  int p = snprintf(out, out_len, "%d hops", hop_count);
+  if (hop_count > 0 && p > 0 && p < (int)out_len - 1) {
+    p += snprintf(out + p, out_len - p, " via ");
+    for (int k = 0; k < hop_count && p < (int)out_len - 4; k++) {
+      if (k > 0 && p < (int)out_len - 2) {
+        p += snprintf(out + p, out_len - p, ",");
+      }
+      for (int b = 0; b < hash_size && p < (int)out_len - 3; b++) {
+        p += snprintf(out + p, out_len - p, "%02X",
+                      pkt->path[k * hash_size + b]);
+      }
+    }
+  }
+}
+
 void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t timestamp,
                                   const char *text) {
   int i = 0;
@@ -578,7 +598,22 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
 
   const char *sep = strstr(text, ": ");
   int sender_len = sep ? (int)(sep - text) : 0;
-  const char *body = sep ? sep + 2 : text;
+  const char *raw_body = sep ? sep + 2 : text;
+
+  // Trim leading/trailing whitespace into a local mutable buffer so commands
+  // like "pocasi  " or " ping\n" still match.
+  char body[64];
+  {
+    const char *s = raw_body;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+    size_t i = 0;
+    while (*s && i < sizeof(body) - 1) body[i++] = *s++;
+    body[i] = '\0';
+    while (i > 0 && (body[i-1] == ' ' || body[i-1] == '\t' ||
+                     body[i-1] == '\r' || body[i-1] == '\n')) {
+      body[--i] = '\0';
+    }
+  }
 
   ChannelDetails reply_chan;
   bool have_chan = getChannel(channel_idx, reply_chan);
@@ -597,23 +632,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
   Serial.printf("[BOT] chan_is_test=%d body_is_ping=%d\n", chan_is_test, body_is_ping);
   if (chan_is_test && body_is_ping) {
     char hops[96];
-    int hop_count = pkt->isRouteFlood() ? (int)pkt->getPathHashCount() : 0;
-    int hash_size = (int)pkt->getPathHashSize();
-    Serial.printf("[BOT] route=%u raw_path_len=%u count=%d size=%d\n",
-                  pkt->getRouteType(), pkt->path_len, hop_count, hash_size);
-    int p = snprintf(hops, sizeof(hops), "%d hops", hop_count);
-    if (hop_count > 0 && p > 0 && p < (int)sizeof(hops) - 1) {
-      p += snprintf(hops + p, sizeof(hops) - p, " via ");
-      for (int k = 0; k < hop_count && p < (int)sizeof(hops) - 4; k++) {
-        if (k > 0 && p < (int)sizeof(hops) - 2) {
-          p += snprintf(hops + p, sizeof(hops) - p, ",");
-        }
-        for (int b = 0; b < hash_size && p < (int)sizeof(hops) - 3; b++) {
-          p += snprintf(hops + p, sizeof(hops) - p, "%02X",
-                        pkt->path[k * hash_size + b]);
-        }
-      }
-    }
+    composeHopsString(pkt, hops, sizeof(hops));
 
     char reply[MAX_TEXT_LEN];
     int n = snprintf(reply, sizeof(reply), "@[%.*s] Ricany slysi [%s]",
@@ -625,7 +644,39 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
                                _prefs.node_name, reply, n);
     Serial.printf("[BOT] sendGroupMessage returned %d\n", ok);
   }
+
+#ifdef WITH_AUX_WIFI
+  bool chan_allows_weather = have_chan && (
+      strcasecmp(reply_chan.name, "#test") == 0 ||
+      strcasecmp(reply_chan.name, "Public") == 0);
+  bool body_is_weather = strcasecmp(body, "pocasi") == 0
+                      || strcasecmp(body, "počasí") == 0
+                      || strcasecmp(body, "weather") == 0;
+  Serial.printf("[BOT] chan_allows_weather=%d body_is_weather=%d\n",
+                chan_allows_weather, body_is_weather);
+  if (chan_allows_weather && body_is_weather) {
+    char wx[80];
+    if (_weather.getCached(wx, sizeof(wx))) {
+      char reply[MAX_TEXT_LEN];
+      int n = snprintf(reply, sizeof(reply), "@[%.*s] %s",
+                       sender_len, text, wx);
+      if (n < 0) n = 0;
+      if (n > (int)sizeof(reply) - 1) n = sizeof(reply) - 1;
+      Serial.printf("[BOT] -> sending weather: '%s' (len=%d)\n", reply, n);
+      bool ok = sendGroupMessage(getRTCClock()->getCurrentTimeUnique(), reply_chan.channel,
+                                 _prefs.node_name, reply, n);
+      Serial.printf("[BOT] sendGroupMessage returned %d\n", ok);
+    } else {
+      Serial.println("[BOT] weather not ready, silent");
+    }
+  }
+#endif
 }
+
+#ifdef WITH_AUX_WIFI
+void MyMesh::beginWeather() { _weather.begin(); }
+void MyMesh::loopWeather() { _weather.loop(); }
+#endif
 
 void MyMesh::onChannelDataRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint16_t data_type,
                                const uint8_t *data, size_t data_len) {

@@ -1,0 +1,22 @@
+; Local PlatformIO overrides (gitignored). Copy this file to
+; platformio.local.ini and fill in your values, then build with:
+;
+;   pio run -e heltec_v4_companion_radio_ble_wifi -t upload
+;
+; This env extends the committed _ble env and turns on an auxiliary
+; WiFi side channel: BLE remains the companion-app transport, while
+; WiFi is brought up only for outbound HTTPS (e.g. weather lookups).
+
+[env:heltec_v4_companion_radio_ble_wifi]
+extends = env:heltec_v4_companion_radio_ble
+build_flags =
+  ${env:heltec_v4_companion_radio_ble.build_flags}
+  -D WITH_AUX_WIFI=1
+  -D AUX_WIFI_SSID='"YourSSID"'
+  -D AUX_WIFI_PWD='"YourPassword"'
+  -D WEATHER_LAT=49.9956
+  -D WEATHER_LON=14.6531
+  -D WEATHER_LABEL='"Ricany"'
+lib_deps =
+  ${env:heltec_v4_companion_radio_ble.lib_deps}
+  bblanchon/ArduinoJson @ ^7.0.0

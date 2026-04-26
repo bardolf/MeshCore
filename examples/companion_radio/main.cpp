@@ -2,6 +2,13 @@
 #include <Mesh.h>
 #include "MyMesh.h"
 
+#ifdef WITH_AUX_WIFI
+  #if !defined(AUX_WIFI_SSID) || !defined(AUX_WIFI_PWD)
+    #error "WITH_AUX_WIFI requires AUX_WIFI_SSID and AUX_WIFI_PWD"
+  #endif
+  #include <WiFi.h>
+#endif
+
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
   uint32_t n = 0;
@@ -211,6 +218,14 @@ void setup() {
   serial_interface.begin(Serial);
 #endif
   the_mesh.startInterface(serial_interface);
+
+#ifdef WITH_AUX_WIFI
+  Serial.println("[WX] aux WiFi enabled, starting...");
+  board.setInhibitSleep(true);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(AUX_WIFI_SSID, AUX_WIFI_PWD);
+  the_mesh.beginWeather();
+#endif
 #else
   #error "need to define filesystem"
 #endif
@@ -233,6 +248,16 @@ void loop() {
     last_hb = now;
     Serial.printf("[HB] %lu ms\n", (unsigned long)now);
   }
+
+#ifdef WITH_AUX_WIFI
+  static uint32_t last_wifi_log = 0;
+  if (now - last_wifi_log >= 30000) {
+    last_wifi_log = now;
+    Serial.printf("[WX] WiFi status=%d rssi=%d\n",
+                  (int)WiFi.status(), (int)WiFi.RSSI());
+  }
+  the_mesh.loopWeather();
+#endif
 
   the_mesh.loop();
   sensors.loop();

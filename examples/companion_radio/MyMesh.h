@@ -70,6 +70,10 @@
 #include <helpers/BaseChatMesh.h>
 #include <helpers/TransportKeyStore.h>
 
+#ifdef WITH_AUX_WIFI
+#include "WeatherClient.h"
+#endif
+
 /* -------------------------------------------------------------------------------------- */
 
 #define REQ_TYPE_GET_STATUS             0x01 // same as _GET_STATS
@@ -99,6 +103,11 @@ public:
   void handleCmdFrame(size_t len);
   bool advert();
   void enterCLIRescue();
+
+#ifdef WITH_AUX_WIFI
+  void beginWeather();
+  void loopWeather();
+#endif
 
   int  getRecentlyHeard(AdvertPath dest[], int max_num);
 
@@ -247,6 +256,10 @@ private:
 
   #define ADVERT_PATH_TABLE_SIZE   16
   AdvertPath advert_paths[ADVERT_PATH_TABLE_SIZE]; // circular table
+
+#ifdef WITH_AUX_WIFI
+  WeatherClient _weather;
+#endif
 };
 
 extern MyMesh the_mesh;
